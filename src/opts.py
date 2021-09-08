@@ -4,7 +4,7 @@ import argparse
 def parse_opts():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--batch_size',default=256,type=int,help='batch size')
+    parser.add_argument('--batch_size',default=2,type=int,help='batch size')
     parser.add_argument('--lr_rate',default=5e-5,type=float)
     parser.add_argument('--epochs',default=100,type=int)
 

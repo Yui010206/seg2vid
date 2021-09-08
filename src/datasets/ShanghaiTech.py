@@ -182,6 +182,8 @@ class ShanghaiTech(Dataset):
         gt_clone = torch.chunk(gt_clone,self.tracklet_len,0)
         weights = torch.chunk(weights,self.tracklet_len,0)
 
+        mpr_weights = torch.cat([gt_clone[i][2:] for i in range(len(gt_clone)-1)],dim=0)
+
         mpr_gt = torch.cat([gt_clone[i][2:,:] for i in range(len(gt_clone)-1)],dim=0)
         mtr_gt = torch.cat([gt_clone[i][:2,:] for i in range(len(gt_clone)-1)],dim=0)
         mpp_gt = gt_clone[-1][2:,:]
@@ -214,6 +216,7 @@ class ShanghaiTech(Dataset):
             'MTR_GT':mtr_gt,
             'MPP_GT':mpp_gt,
             'MTP_GT':mtp_gt,
+            'MPR_weights':mpr_weights
             }
 
         return input_dict
