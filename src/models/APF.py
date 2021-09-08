@@ -1,36 +1,18 @@
 import torch
-from torch.autograd import Variable as Vb
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
 import torchvision.models
-import torch.optim as optim
-import os
-import logging
-import torchvision.utils as tov
 
-import math
-import logging
-from functools import partial
-from collections import OrderedDict
-from einops import rearrange, repeat
-
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from timm.models.helpers import load_pretrained
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from timm.models.registry import register_model
+from functools import partial
+from timm.models.layers import DropPath
 
+# class GELU(nn.Module):
+#     def __init__(self):
+#         super(GELU, self).__init__()
 
-class GELU(nn.Module):
-    def __init__(self):
-        super(GELU, self).__init__()
-
-    def forward(self, x):
-        return 0.5*x*(1+F.tanh(np.sqrt(2/np.pi)*(x+0.044715*torch.pow(x,3))))
+#     def forward(self, x):
+#         return 0.5*x*(1+F.tanh(np.sqrt(2/np.pi)*(x+0.044715*torch.pow(x,3))))
         
 
 class Mlp(nn.Module):
@@ -70,8 +52,10 @@ class Attention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
+
         if mask is not None:
             attn = attn.masked_fill(mask == 0, -1e9)
+
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -102,9 +86,9 @@ class Block(nn.Module):
         return x
 
 class AnoPoseFormer(nn.Module):
-    def __init__(self, num_frame=8, headless=True, in_chans=2, embed_dim=32, depth=4,
+    def __init__(self, tracklet_len=8, headless=False, in_chans=2, embed_dim=128, depth=8,
                  num_heads=8, mlp_ratio=2., qkv_bias=True, qk_scale=None,
-                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,  norm_layer=None, mode='MPP'):
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,  norm_layer=None, tasks='MPP_MTP_MTR_MPR'):
 
         """    ##########hybrid_backbone=None, representation_size=None,
         Args:
@@ -131,22 +115,17 @@ class AnoPoseFormer(nn.Module):
             self.num_joints = 17
 
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
-        out_dim =  2     #### output dimension is num_joints * 2
-
-        self.mode = mode
+        out_dim =  2 
+        self.tasks = tasks
+        self.tracklet_len = tracklet_len
 
         ### spatial patch embedding
         self.point_embed = nn.Linear(in_chans, embed_dim)
         self.type_embed = nn.Embedding(3,embed_dim)
         self.spatial_embed = nn.Embedding(self.num_joints+2,embed_dim)
-        self.temporal_embed = nn.Embedding(num_frame,embed_dim)
+        self.temporal_embed = nn.Embedding(tracklet_len,embed_dim)
         self.norm = norm_layer(embed_dim)
         self.drop = nn.Dropout(p=drop_rate)
-
-        self.mpr_mask = 
-        self.mpp_mask = [0 for i in range((self.num_frame-1)*(self.num_joints+2)+2)] + [1 for i in range(self.num_joints)]
-        self.mtr_mask =
-        self.mtp_mask = 
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.Spatial_blocks = nn.ModuleList([
@@ -155,34 +134,40 @@ class AnoPoseFormer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth)])
 
-        if 'MPP' in mode:
+        if 'MPP' in tasks:
 
             self.pose_head_pre = nn.Sequential(
                 nn.LayerNorm(embed_dim),
-                nn.Linear(embed_dim , embed_dim/2),
+                nn.Linear(embed_dim , int(embed_dim/2)),
                 nn.ReLU(True),
-                nn.Linear(embed_dim , out_dim)
+                nn.Linear(int(embed_dim/2) , out_dim)
                 )
-        if 'MPR' in mode:
+
+        if 'MPR' in tasks:
+
             self.pose_head_rec = nn.Sequential(
                 nn.LayerNorm(embed_dim),
-                nn.Linear(embed_dim , embed_dim/2),
+                nn.Linear(embed_dim , int(embed_dim/2)),
                 nn.ReLU(True),
-                nn.Linear(embed_dim , out_dim)
+                nn.Linear(int(embed_dim/2) , out_dim)
             )
-        if 'MTR' in mode:
+
+        if 'MTR' in tasks:
+
             self.track_head_rec = nn.Sequential(
                 nn.LayerNorm(embed_dim),
-                nn.Linear(embed_dim , embed_dim/2),
+                nn.Linear(embed_dim , int(embed_dim/2)),
                 nn.ReLU(True),
-                nn.Linear(embed_dim , out_dim)
+                nn.Linear(int(embed_dim/2) , out_dim)
             )
-        if 'MTP' in mode:
+
+        if 'MTP' in tasks:
+
             self.track_head_pre = nn.Sequential(
                 nn.LayerNorm(embed_dim),
-                nn.Linear(embed_dim , embed_dim/2),
+                nn.Linear(embed_dim , int(embed_dim/2)),
                 nn.ReLU(True),
-                nn.Linear(embed_dim , out_dim)
+                nn.Linear(int(embed_dim/2) , out_dim)
             )
 
     def encode_input(self, points,type_tokens,spatial_tokens,temporal_tokens):
@@ -195,7 +180,7 @@ class AnoPoseFormer(nn.Module):
         type_embedding = self.type_embed(type_tokens)
         spatial_embedding = self.spatial_embed(spatial_tokens)
         temporal_embedding = self.temporal_embed(temporal_tokens)
-        embedding = 3*points_embedding + type_embedding + spatial_embedding + temporal_embedding
+        embedding = points_embedding + type_embedding + spatial_embedding + temporal_embedding
         embedding = self.norm(embedding)
         embedding = self.drop(embedding)
 
@@ -205,52 +190,52 @@ class AnoPoseFormer(nn.Module):
 
         return embedding
 
-    def forward(self,points,type_tokens,spatial_tokens,temporal_tokens,labels,task,headless):
+    def forward(self,points,type_tokens,spatial_tokens,temporal_tokens):
 
         embedding = self.encode_input(points,type_tokens,spatial_tokens,temporal_tokens)
+        tracks = torch.chunk(embedding,self.tracklet_len,1)
 
-        pose_pre = embedding[:,-self.num_joints:,:]
-        track_pre = embedding[:,-self.num_joints-2:-self.num_joints,:]
-        
-        tracks = torch.chunk(embedding,self.num_frame,1)
-
-        pose_rec = torch.cat([t[:,2:,:] for t in tracks],dim=1)
-
-        track_rec = torch.cat([t[:,:2,:] for t in tracks],dim=1)
+        pose_rec = torch.cat([tracks[i][:,2:,:] for i in range(len(tracks)-1)],dim=1)
+        box_rec = torch.cat([tracks[i][:,:2,:] for i in range(len(tracks)-1)],dim=1)
+        pose_pre = tracks[-1][:,2:,:]
+        box_pre = tracks[-1][:,:2,:]
 
         output={}
 
-        if 'MPP' in mode:
+        if 'MPP' in self.tasks:
 
             pose_pre = self.pose_head_pre(pose_pre)
             output['MPP_output'] = pose_pre
 
-        if 'MPR' in mode:
+        if 'MPR' in self.tasks:
             
             pose_rec = self.pose_head_rec(pose_rec)
             output['MPR_output'] = pose_rec
 
-        if 'MTP' in mode:
+        if 'MTP' in self.tasks:
 
-            track_pre = self.track_head_pre(track_pre)
-            output['MTR_output'] = track_pre
+            box_pre = self.track_head_pre(box_pre)
+            output['MTP_output'] = box_pre
 
-        if 'MTR' in mode:
+        if 'MTR' in self.tasks:
 
-            track_rec = self.track_head_pre(track_rec)
-            output['MTR_output'] = track_rec
+            box_rec = self.track_head_pre(box_rec)
+            output['MTR_output'] = box_rec
 
         return output
 
 
-
 if __name__ == '__main__':
     PoseTransformer = AnoPoseFormer()
-    points = torch.rand([4,16*4,2])
-    type_tokens = torch.randint(0,3,(4,16*4))
-    rec = PoseTransformer(points,type_tokens,type_tokens,type_tokens)
+    points = torch.rand([4,19*8,2])
+    type_tokens = torch.randint(0,3,(4,19*8))
 
-    print('rec',rec.shape)
+    output = PoseTransformer(points,type_tokens,type_tokens,type_tokens)
+
+    print('MPP_output',output['MPP_output'].shape)
+    print('MPR_output',output['MPR_output'].shape)
+    print('MTP_output',output['MTP_output'].shape)
+    print('MTR_output',output['MTR_output'].shape)
 
 
 

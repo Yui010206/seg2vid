@@ -45,3 +45,10 @@ def read_lines(filepath):
 
 def get_rounded_percentage(float_number, n_floats=2):
     return round(float_number * 100, n_floats)
+
+
+def save_parameters(path,opt):
+    '''Write parameters setting file'''
+    with open(os.path.join(path, 'params.txt'), 'w') as file:
+        file.write('Training Parameters: \n')
+        file.write(str(opt) + '\n')

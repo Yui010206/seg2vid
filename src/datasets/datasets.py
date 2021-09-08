@@ -7,7 +7,7 @@ def get_training_set(opt):
     if opt.dataset == 'ShanghaiTech':
         from ShanghaiTech import ShanghaiTech
 
-        train_Dataset = ShanghaiTech(pose_dir=ShanghaiTech_Pose_Dir, split='train', tracklet_len=opt.track_length ,stride=opt.stride,head_less=opt.headless)
+        train_Dataset = ShanghaiTech(pose_dir=ShanghaiTech_Pose_Dir, split='train', tracklet_len=opt.tracklet_len ,stride=opt.stride,head_less=opt.headless)
 
     elif opt.dataset == 'IITB':
         pass
@@ -31,7 +31,7 @@ def get_test_set(opt):
     if opt.dataset == 'ShanghaiTech':
         from ShanghaiTech import ShanghaiTech
 
-        test_Dataset = ShanghaiTech(pose_dir=ShanghaiTech_Pose_Dir,split='test', tracklet_len=opt.track_length ,stride=opt.stride, head_less=opt.headless)
+        test_Dataset = ShanghaiTech(pose_dir=ShanghaiTech_Pose_Dir,split='test', tracklet_len=opt.tracklet_len ,stride=opt.stride, head_less=opt.headless)
 
     elif opt.dataset == 'IITB':
         pass

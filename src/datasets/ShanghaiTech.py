@@ -178,6 +178,15 @@ class ShanghaiTech(Dataset):
         gt_seqence = torch.tensor(gt_seqence)*self.scale_factor
         weights = torch.tensor(weights)
 
+        gt_clone = gt_seqence.clone()
+        gt_clone = torch.chunk(gt_clone,self.tracklet_len,0)
+        weights = torch.chunk(weights,self.tracklet_len,0)
+
+        mpr_gt = torch.cat([gt_clone[i][2:,:] for i in range(len(gt_clone)-1)],dim=0)
+        mtr_gt = torch.cat([gt_clone[i][:2,:] for i in range(len(gt_clone)-1)],dim=0)
+        mpp_gt = gt_clone[-1][2:,:]
+        mtp_gt = gt_clone[-1][:2,:]
+
         type_token = self.type_token.clone()
         spatial_token = self.spatial_token.clone()
         temporal_token = self.temporal_token.clone()
@@ -200,7 +209,11 @@ class ShanghaiTech(Dataset):
             'frame_width':self.frame_width,
             'frame_height':self.frame_height,
             'scale_factor': self.scale_factor,
-            'joints_num':self.joints_num
+            'joints_num':self.joints_num,
+            'MPR_GT':mpr_gt,
+            'MTR_GT':mtr_gt,
+            'MPP_GT':mpp_gt,
+            'MTP_GT':mtp_gt,
             }
 
         return input_dict
